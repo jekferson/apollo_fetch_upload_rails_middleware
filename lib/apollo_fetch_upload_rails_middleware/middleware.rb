@@ -2,51 +2,67 @@ module ApolloFetchUploadRailsMiddleware
   class Middleware
     def initialize(app)
       @app = app
+      @file_to_variables = {}
     end
 
     def call(env)
       request = Rack::Request.new(env)
 
-      if request.content_type.try(:start_with?, 'multipart/form-data') &&
-         request.params.key?('operations') &&
-         request.params.key?('map')
-
+      if request.content_type.try(:start_with?, 'multipart/form-data')
         gql_operations = JSON.parse(request.params['operations'])
-        file_to_variables_map = JSON.parse(request.params['map'])
-
-        # Gather file data.
-        file_to_metadata_map = {}
-        file_to_variables_map.each_key do |file_index|
-          file_to_metadata_map[file_index] = validate_file_info(request.params[file_index.to_s])
-        end
-
-        if gql_operations.is_a?(Hash)
-          request.update_param('query', gql_operations['query'])
-          request.update_param('operationName', gql_operations['operationName'])
-          request.update_param(
-            'variables',
-            fill_in_gql_variables(
-              file_to_variables_map,
-              file_to_metadata_map,
-              gql_operations['variables'],
-            ),
-          )
-        elsif gql_operations.is_a?(Array)
-          gql_operations.each_with_index do |gql_operation, idx|
-            gql_operation['variables'] = fill_in_gql_variables(
-              file_to_variables_map,
-              file_to_metadata_map,
-              gql_operation['variables'],
-              batch_index: idx,
-            )
+  
+        request.update_param('query', gql_operations['query'])
+        request.update_param('operationName', gql_operations['operationName'])
+  
+        if request.params.key?('operations') &&
+           request.params.key?('map')
+  
+          if request.params.present? && request.params['variables'].present? && request.params['map'].present?
+  
+            @file_to_variables = JSON.parse(request.params['variables'])
+            file_to_variables_map = JSON.parse(request.params['map'])
+    
+            # Gather file data.
+            file_to_metadata_map = {}
+            file_to_variables_map.each_key do |file_index|
+              file_to_metadata_map[file_index] = validate_file_info(request.params[file_index.to_s])
+            end
+    
+            if gql_operations.is_a?(Hash)
+              
+              request.update_param(
+                'variables',
+                fill_in_gql_variables(
+                  file_to_variables_map,
+                  file_to_metadata_map,
+                  gql_operations['variables'],
+                ),
+              )
+    
+              fill_in_gql_variables(
+                file_to_variables_map,
+                file_to_metadata_map,
+                gql_operations['variables'],
+              )
+            elsif gql_operations.is_a?(Array)
+              gql_operations.each_with_index do |gql_operation, idx|
+                gql_operation['variables'] = fill_in_gql_variables(
+                  file_to_variables_map,
+                  file_to_metadata_map,
+                  gql_operation['variables'],
+                  batch_index: idx,
+                )
+              end
+    
+              # cf. https://github.com/rmosolgo/graphql-ruby/blob/master/
+              # guides/queries/multiplex.md#apollo-query-batching
+              # -> "Apollo sends the params in a _json variable when batching is enabled"
+              request.update_param('_json', gql_operations)
+            else
+              raise 'Invalid JSON in "operations" request param.'
+            end
           end
-
-          # cf. https://github.com/rmosolgo/graphql-ruby/blob/master/
-          # guides/queries/multiplex.md#apollo-query-batching
-          # -> "Apollo sends the params in a _json variable when batching is enabled"
-          request.update_param('_json', gql_operations)
-        else
-          raise 'Invalid JSON in "operations" request param.'
+  
         end
       end
 
@@ -101,7 +117,7 @@ module ApolloFetchUploadRailsMiddleware
         end
       end
 
-      variables_wrapper[:variables]
+      @file_to_variables
     end
 
     private
@@ -112,19 +128,14 @@ module ApolloFetchUploadRailsMiddleware
 
       raise 'Not deep enough' unless path_components.size >= 2
 
-      h_or_a = variables_h
+      h_or_a = @file_to_variables
       while path_components.size > 1
         path_component = path_components.shift
-        if h_or_a.is_a?(Array)
-          h_or_a = h_or_a[path_component.to_i]
-        elsif h_or_a.is_a?(Hash)
-          h_or_a = h_or_a[path_component]
-        else
-          raise 'Unexpected type in variables path.'
-        end
+
+        h_or_a = h_or_a[path_component]
       end
 
-      # Now the last path component is the field we want to set.
+      # # Now the last path component is the field we want to set.
       raise 'Bad path components.' unless path_components.size == 1
       field_name = path_components.first
 
@@ -135,21 +146,29 @@ module ApolloFetchUploadRailsMiddleware
       else
         raise 'Unexpected type in variables path.'
       end
+
+      @file_to_variables
+
     end
 
     def validate_file_info(file_data)
-      [:filename, :tempfile, :type].each do |k|
-        raise "Missing key '#{k.to_s}' in file data." unless file_data[k].present?
+
+      if file_data.present?
+        [:filename, :tempfile, :type].each do |k|
+          raise "Missing key '#{k.to_s}' in file data." unless file_data[k].present?
+        end
+  
+        raise 'Expected Tempfile in file_data[:tempfile]' unless file_data[:tempfile].is_a?(Tempfile)
+  
+        {
+          name: file_data[:filename],
+          path: file_data[:tempfile].path,
+          size: file_data[:tempfile].size,
+          type: file_data[:type],
+        }
+      else
+        nil
       end
-
-      raise 'Expected Tempfile in file_data[:tempfile]' unless file_data[:tempfile].is_a?(Tempfile)
-
-      {
-        name: file_data[:filename],
-        path: file_data[:tempfile].path,
-        size: file_data[:tempfile].size,
-        type: file_data[:type],
-      }
     end
   end
 end

@@ -6,11 +6,11 @@ require 'apollo_fetch_upload_rails_middleware/version'
 Gem::Specification.new do |spec|
   spec.name          = 'apollo_fetch_upload_rails_middleware'
   spec.version       = ApolloFetchUploadRailsMiddleware::VERSION
-  spec.authors       = ['Abe Land']
-  spec.email         = ['abe@lostfoundlabs.com']
+  spec.authors       = ['Jekferson Diaz']
+  spec.email         = ['jekferson@gmail.com']
 
   spec.summary       = 'Rails middleware for using the apollo-fetch-upload npm package on the client.'
-  spec.homepage      = 'https://github.com/abeland/apollo-fetch-upload-rails-middleware'
+  spec.homepage      = 'https://github.com/jekferson/apollo_fetch_upload_rails_middleware'
   spec.license       = 'MIT'
 
   spec.add_dependency 'rails', '~> 5'
